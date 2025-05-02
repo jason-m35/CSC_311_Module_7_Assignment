@@ -1,66 +1,167 @@
-package service;
+package model;
 
-import java.util.HashSet;
-import java.util.Set;
+import java.time.LocalDateTime;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.prefs.Preferences;
 
 public class UserSession {
+    // singleton instance
+    private static volatile UserSession instance;
 
-    private static UserSession instance;
+    // lcok for thread safety
+    private static final ReentrantLock lock = new ReentrantLock();
 
-    private String userName;
 
-    private String password;
-    private String privileges;
+    private String username;
+    private LocalDateTime loginTime;
+    private AtomicBoolean loggedIn = new AtomicBoolean(false);
 
-    private UserSession(String userName, String password, String privileges) {
-        this.userName = userName;
-        this.password = password;
-        this.privileges = privileges;
-        Preferences userPreferences = Preferences.userRoot();
-        userPreferences.put("USERNAME",userName);
-        userPreferences.put("PASSWORD",password);
-        userPreferences.put("PRIVILEGES",privileges);
+
+    private Preferences prefs;
+
+
+    private static final String PREF_USERNAME = "username";
+    private static final String PREF_PASSWORD = "password";
+
+
+    private UserSession() {
+
+        prefs = Preferences.userNodeForPackage(UserSession.class);
     }
 
+    public static UserSession getInstance() {
+
+        if (instance == null) {
 
 
-    public static UserSession getInstace(String userName,String password, String privileges) {
-        if(instance == null) {
-            instance = new UserSession(userName, password, privileges);
+
+            // Acquire lock
+            lock.lock();
+            try {
+
+                if (instance == null) {
+                    instance = new UserSession();
+                }
+            } finally {
+
+                lock.unlock();
+            }
         }
         return instance;
     }
 
-    public static UserSession getInstace(String userName,String password) {
-        if(instance == null) {
-            instance = new UserSession(userName, password, "NONE");
+
+    public void startSession(String username, String password, boolean rememberMe) {
+        lock.lock();
+        try {
+            this.username = username;
+            this.loginTime = LocalDateTime.now();
+            this.loggedIn.set(true);
+
+
+            if (rememberMe) {
+                prefs.put(PREF_USERNAME, username);
+
+
+                prefs.put(PREF_PASSWORD, password);
+            }
+        } finally {
+            lock.unlock();
         }
-        return instance;
-    }
-    public String getUserName() {
-        return this.userName;
     }
 
-    public String getPassword() {
-        return this.password;
+    /**
+     * End the current user session
+     */
+    public void endSession() {
+        lock.lock();
+        try {
+            this.username = null;
+            this.loginTime = null;
+            this.loggedIn.set(false);
+        } finally {
+            lock.unlock();
+        }
     }
 
-    public String getPrivileges() {
-        return this.privileges;
+
+    public String getUsername() {
+        lock.lock();
+        try {
+            return username;
+        } finally {
+            lock.unlock();
+        }
     }
 
-    public void cleanUserSession() {
-        this.userName = "";// or null
-        this.password = "";
-        this.privileges = "";// or null
+
+    public LocalDateTime getLoginTime() {
+        lock.lock();
+        try {
+            return loginTime;
+        } finally {
+            lock.unlock();
+        }
+    }
+    public boolean isLoggedIn() {
+        return loggedIn.get();
     }
 
-    @Override
-    public String toString() {
-        return "UserSession{" +
-                "userName='" + this.userName + '\'' +
-                ", privileges=" + this.privileges +
-                '}';
+    public String getSavedUsername() {
+        return prefs.get(PREF_USERNAME, "");
+    }
+
+
+    public String getSavedPassword() {
+        return prefs.get(PREF_PASSWORD, "");
+    }
+
+
+    public boolean hasSavedCredentials() {
+        return !getSavedUsername().isEmpty() && !getSavedPassword().isEmpty();
+    }
+
+
+    public void clearSavedCredentials() {
+        prefs.remove(PREF_USERNAME);
+        prefs.remove(PREF_PASSWORD);
+    }
+
+
+    public boolean registerUser(String username, String password) {
+
+
+        try {
+
+            Preferences userPrefs = Preferences.userNodeForPackage(UserSession.class).node("registeredUsers");
+
+
+            if (!userPrefs.get(username, "").isEmpty()) {
+                return false; // User already exists
+            }
+
+
+            userPrefs.put(username, password);
+            return true;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    /**
+     *
+     *
+     * @param username the username to authenticate
+     * @param password the password to authenticate
+     * @return true if authentication was successful
+     */
+    public boolean authenticateUser(String username, String password) {
+        Preferences userPrefs = Preferences.userNodeForPackage(UserSession.class).node("registeredUsers");
+        String storedPassword = userPrefs.get(username, null);
+
+
+        return storedPassword != null && storedPassword.equals(password);
     }
 }
